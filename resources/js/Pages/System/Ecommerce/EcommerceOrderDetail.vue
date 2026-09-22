@@ -35,7 +35,7 @@
             </div>
             <div class="overflow-hidden rounded-2xl border border-slate-200">
               <div ref="trackingMapElement" class="h-[340px] w-full sm:h-[440px]"></div>
-              <p v-if="!hasTrackingCoordinates" class="px-4 py-3 text-sm text-amber-700">Waiting for the driver’s live GPS location.</p>
+              <p v-if="!hasTrackingCoordinates" class="px-4 py-3 text-sm text-amber-700">Waiting for the driverâ€™s live GPS location.</p>
             </div>
 
             <div v-if="deliveryTimeline.length" class="space-y-3 border-t border-slate-100 pt-4">
@@ -110,14 +110,14 @@
                   <p class="truncate text-sm font-semibold text-slate-900">{{ item.product_name }}</p>
                   <p class="truncate text-xs text-slate-500">Variant: {{ item.sku || 'Standard' }}</p>
                   <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                    <span>Unit: {{ item.unit_of_measurement || '—' }}</span>
+                    <span>Unit: {{ item.unit_of_measurement || 'â€”' }}</span>
                     <span v-if="item.category_name">Category: {{ item.category_name }}</span>
                     <span v-if="item.brand">Brand: {{ item.brand }}</span>
                     <span v-if="item.weight_kg !== null && item.weight_kg !== undefined">Weight: {{ item.weight_kg }} kg</span>
                   </div>
                   <p v-if="item.description" class="mt-1 line-clamp-2 text-xs text-slate-500">{{ item.description }}</p>
                   <p v-if="item.dimensions && (item.dimensions.length_cm || item.dimensions.width_cm || item.dimensions.height_cm)" class="text-xs text-slate-500">
-                    Dimensions: {{ item.dimensions.length_cm || 0 }} cm × {{ item.dimensions.width_cm || 0 }} cm × {{ item.dimensions.height_cm || 0 }} cm
+                    Dimensions: {{ item.dimensions.length_cm || 0 }} cm Ã— {{ item.dimensions.width_cm || 0 }} cm Ã— {{ item.dimensions.height_cm || 0 }} cm
                   </p>
                 </div>
               </div>
@@ -151,11 +151,35 @@
                     class="w-full sm:w-auto"
                     @click="goReviewPage(item.id)"
                   />
+                  <Button
+                    v-if="canSetRefundMethod(item)"
+                    :label="item.return_request.refund?.refund_method ? 'Update Refund Method' : 'Set Refund Method'"
+                    icon="pi pi-wallet"
+                    severity="info"
+                    size="small"
+                    outlined
+                    class="w-full sm:w-auto"
+                    @click="openRefundMethod(item.return_request)"
+                  />
                 </div>
               </div>
               <div v-if="item.return_request || item.review"
                 class="w-full space-y-3 border-t border-slate-100 pt-3 text-xs text-slate-600">
                 <p v-if="item.review">Your review: {{ item.review.rating }}/5</p>
+                <div v-if="item.return_request?.refund?.refund_method"
+                  class="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+                  <p class="font-semibold">Refund Account</p>
+                  <p class="mt-1">{{ refundMethodLabel(item.return_request.refund.refund_method) }}</p>
+                  <p>{{ item.return_request.refund.refund_account_name }}</p>
+                  <p>{{ item.return_request.refund.refund_account_number }}</p>
+                  <p v-if="item.return_request.refund.status === 'sent'" class="mt-2 font-medium">Finance sent the refund. Expected arrival: less than 30 days.</p>
+                  <p v-else class="mt-2 font-medium">Estimated arrival: less than 30 days after Finance sends the refund.</p>
+                </div>
+                <div v-else-if="item.return_request?.return_type === 'refund'"
+                  class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p class="font-semibold">Refund approved</p>
+                  <p class="mt-1">Choose where you want to receive the refund. Estimated arrival is less than 30 days after Finance sends it.</p>
+                </div>
 
                 <div v-if="item.return_request?.investigation_ticket"
                   class="rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -163,7 +187,7 @@
                     <div>
                       <p class="text-sm font-semibold text-slate-900">Return Investigation Ticket</p>
                       <p class="mt-0.5 text-xs text-slate-500">
-                        Ticket #{{ item.return_request.investigation_ticket.id }}
+                        Reference {{ item.return_request.investigation_ticket.reference_number || ('RET-' + String(item.return_request.investigation_ticket.id).padStart(6, '0')) }}
                       </p>
                     </div>
                     <Tag
@@ -224,7 +248,7 @@
                 <p class="text-sm font-semibold text-slate-900">{{ item.title }}</p>
                 <p class="mt-1 text-sm text-slate-600">{{ formatTimelineDescription(item.description) }}</p>
                 <p class="mt-1 text-xs text-slate-400">
-                  {{ formatDateTime(item.created_at) }} • {{ item.actor || 'System' }}
+                  {{ formatDateTime(item.created_at) }} â€¢ {{ item.actor || 'System' }}
                 </p>
                 <div v-if="proofUrls(item).length" class="mt-3 flex flex-wrap gap-3">
                   <button v-for="proof in proofUrls(item)" :key="proof.url" type="button"
@@ -242,6 +266,34 @@
       </Card>
     </template>
   
+    <Dialog v-model:visible="refundDialogVisible" modal header="Refund Payment Method" class="w-full max-w-lg">
+      <div class="space-y-4">
+        <p class="text-sm text-slate-600">Choose where Finance should send the approved refund.</p>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">Payment method *</label>
+          <Select v-model="refundForm.refund_method" :options="refundMethodOptions"
+            optionLabel="label" optionValue="value" fluid placeholder="Select a payment method" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">Account name *</label>
+          <InputText v-model="refundForm.refund_account_name" fluid placeholder="Name registered on the account" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-slate-700">
+            {{ refundForm.refund_method === 'card' ? 'Card number or refund reference *' : 'GCash mobile number *' }}
+          </label>
+          <InputText v-model="refundForm.refund_account_number" fluid
+            :placeholder="refundForm.refund_method === 'card' ? 'Card number or reference' : '09XXXXXXXXX'" />
+          <p v-if="refundForm.refund_method === 'card'" class="mt-2 text-xs text-slate-500">Never enter your CVV or PIN.</p>
+        </div>
+      </div>
+      <template #footer>
+        <Button label="Cancel" severity="secondary" outlined @click="refundDialogVisible = false" />
+        <Button label="Save Refund Method" icon="pi pi-save" :loading="savingRefundMethod"
+          :disabled="!refundFormValid || savingRefundMethod" @click="saveRefundMethod" />
+      </template>
+    </Dialog>
+
     <Dialog v-model:visible="mediaPreview.visible" modal :header="mediaPreview.title" class="w-full max-w-4xl">
       <div class="flex items-center justify-center rounded-lg bg-slate-50 p-2">
         <img v-if="mediaPreview.url" :src="mediaPreview.url" alt="Delivery proof"
@@ -274,6 +326,19 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const order = ref<any>(null)
+const refundDialogVisible = ref(false)
+const savingRefundMethod = ref(false)
+const activeReturnId = ref<number | null>(null)
+const refundMethodOptions = [
+  { label: 'GCash', value: 'gcash' },
+  { label: 'Card', value: 'card' },
+]
+const refundForm = reactive({ refund_method: '', refund_account_name: '', refund_account_number: '' })
+const refundFormValid = computed(() => Boolean(
+  refundForm.refund_method
+    && refundForm.refund_account_name.trim()
+    && refundForm.refund_account_number.trim(),
+))
 const trackingMapElement = ref<HTMLElement | null>(null)
 let trackingMap: MapboxMap | null = null
 let mapboxgl: typeof import('mapbox-gl').default | null = null
@@ -486,7 +551,9 @@ function statusLabel(status: string) {
   if (value === 'return_pending') return 'Return Pending'
   if (value === 'return_approved') return 'Return Approved'
   if (value === 'return_received') return 'Return Received'
+  if (value === 'return_processing' || value === 'refund_pending') return 'Refund Pending'
   if (value === 'refunded') return 'Refunded'
+  if (value === 'replaced') return 'Replaced'
   return formatStatus(status)
 }
 
@@ -591,6 +658,44 @@ function goReviewPage(itemId: number) {
   router.push({ name: 'ecommerce.order-review', params: { id: order.value.id, itemId } })
 }
 
+function canSetRefundMethod(item: any) {
+  const request = item?.return_request
+  return request?.return_type === 'refund'
+    && ['approved', 'received', 'refund_pending'].includes(String(request.status || ''))
+    && (!request.refund || ['pending_inspection', 'pending'].includes(String(request.refund.status || '')))
+}
+
+function refundMethodLabel(value: string) {
+  return ({ gcash: 'GCash', card: 'Card' } as Record<string, string>)[value] || formatStatus(value)
+}
+
+function openRefundMethod(returnRequest: any) {
+  activeReturnId.value = Number(returnRequest.id)
+  refundForm.refund_method = returnRequest.refund?.refund_method || ''
+  refundForm.refund_account_name = returnRequest.refund?.refund_account_name || ''
+  refundForm.refund_account_number = returnRequest.refund?.refund_account_number || ''
+  refundDialogVisible.value = true
+}
+
+async function saveRefundMethod() {
+  if (!activeReturnId.value || !refundFormValid.value || savingRefundMethod.value) return
+  savingRefundMethod.value = true
+  try {
+    await ecommerceService.updateRefundPaymentMethod(activeReturnId.value, {
+      refund_method: refundForm.refund_method as 'gcash' | 'card',
+      refund_account_name: refundForm.refund_account_name.trim(),
+      refund_account_number: refundForm.refund_account_number.trim(),
+    })
+    refundDialogVisible.value = false
+    await showAlert({ severity: 'success', summary: 'Saved', detail: 'Your refund payment method was saved for Finance.' })
+    await loadOrderDetail()
+  } catch (error: any) {
+    await showAlert({ severity: 'error', summary: 'Unable to Save', detail: error?.response?.data?.message || 'Unable to save refund payment method.' })
+  } finally {
+    savingRefundMethod.value = false
+  }
+}
+
 function goChatStore() {
   if (!order.value?.store_id) return
   router.push({ name: 'ecommerce.chats', query: { store_id: String(order.value.store_id) } })
@@ -605,3 +710,5 @@ onBeforeUnmount(() => {
   destinationMarker = null
 })
 </script>
+
+

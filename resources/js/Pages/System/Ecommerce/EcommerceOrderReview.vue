@@ -26,6 +26,16 @@
             <Textarea v-model="form.review_text" rows="4" fluid placeholder="Share your experience with this product." />
           </div>
 
+          <div class="space-y-2">
+            <label for="review-attachment" class="text-sm font-semibold text-slate-700">Photo (optional)</label>
+            <input id="review-attachment" type="file" accept="image/jpeg,image/png,image/webp"
+              class="block w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-600"
+              @change="onAttachmentChange" />
+            <p class="text-xs text-slate-500">JPG, PNG, or WebP up to 5 MB.</p>
+            <img v-if="attachmentPreview" :src="attachmentPreview" alt="Review photo preview"
+              class="h-24 w-24 rounded-xl border border-slate-200 object-cover" />
+          </div>
+
           <Button label="Submit Review" severity="info" :loading="submitting" @click="submitReview" />
         </div>
       </template>
@@ -35,7 +45,7 @@
 
 <script setup lang="ts">
 import EcommerceMobileWrapper from '@/Layouts/EcommerceMobileWrapper.vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ecommerceService from '@/services/ecommerce.service'
 import Textarea from 'primevue/textarea'
@@ -51,6 +61,8 @@ const router = useRouter()
 const loading = ref(false)
 const submitting = ref(false)
 const order = ref<any>(null)
+const attachment = ref<File | null>(null)
+const attachmentPreview = ref('')
 const form = reactive({
   rating: 5,
   review_text: '',
@@ -60,6 +72,25 @@ const selectedItem = computed(() => {
   const itemId = Number(route.params.itemId)
   return (order.value?.items || []).find((item: any) => Number(item.id) === itemId) || null
 })
+
+function clearAttachmentPreview() {
+  if (attachmentPreview.value) URL.revokeObjectURL(attachmentPreview.value)
+  attachmentPreview.value = ''
+}
+
+function onAttachmentChange(event: Event) {
+  clearAttachmentPreview()
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] || null
+  if (file && file.size > 5 * 1024 * 1024) {
+    attachment.value = null
+    input.value = ''
+    showAlert({ severity: 'warn', summary: 'Photo too large', detail: 'Choose an image up to 5 MB.' })
+    return
+  }
+  attachment.value = file
+  if (file) attachmentPreview.value = URL.createObjectURL(file)
+}
 
 async function loadOrder() {
   loading.value = true
@@ -90,6 +121,7 @@ async function submitReview() {
     const response = await ecommerceService.submitItemReview(selectedItem.value.id, {
       rating: Number(form.rating),
       review_text: form.review_text.trim() || undefined,
+      attachment: attachment.value,
     })
 
     const productRating = response.data?.data?.product_rating
@@ -121,4 +153,5 @@ function goBack() {
 }
 
 onMounted(loadOrder)
+onBeforeUnmount(clearAttachmentPreview)
 </script>

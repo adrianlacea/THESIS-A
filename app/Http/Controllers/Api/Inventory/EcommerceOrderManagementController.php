@@ -827,7 +827,7 @@ class EcommerceOrderManagementController extends Controller
             'title' => 'New message about your order',
             'message' => $preview,
             'severity' => 'info',
-            'link' => '/shop/chats?store_id=' . (int) $order->store_id,
+            'link' => '/chats?store_id=' . (int) $order->store_id,
         ]);
 
         return response()->json(['success' => true, 'data' => $message], 201);

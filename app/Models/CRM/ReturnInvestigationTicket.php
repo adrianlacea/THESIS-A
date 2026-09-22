@@ -15,6 +15,7 @@ class ReturnInvestigationTicket extends Model
 
     protected $fillable = [
         'return_id',
+        'reference_number',
         'store_id',
         'created_by',
         'expected_investigation_date',

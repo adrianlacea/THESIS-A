@@ -18,6 +18,7 @@ use App\Models\Ecommerce\EcommerceStoreFollow;
 use App\Models\CRM\EcommerceVoucher;
 use App\Models\Admin\ViolationReport;
 use App\Models\Customer\Customer;
+use App\Models\Finance\FinanceRefund;
 use App\Models\Inventory\BranchInventory;
 use App\Models\ProductCatalog\Category;
 use App\Models\ProductCatalog\Product;
@@ -30,6 +31,7 @@ use App\Models\Logistics\DeliveryZoneRate;
 use App\Models\CRM\SalesReview;
 use App\Services\Sales\OrderCommissionService;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -756,12 +758,38 @@ class EcommerceController extends Controller
             ->latest('created_at')
             ->paginate($reviewPerPage);
 
-        $reviews->getCollection()->transform(function (EcommerceProductReview $review) {
+        $reviewCollection = $reviews->getCollection();
+        $replyMap = SalesReview::query()
+            ->where('store_id', $storeId)
+            ->whereIn('order_type', ['ecommerce', 'ecommerce_order'])
+            ->where('product_id', $product->id)
+            ->whereIn('order_id', $reviewCollection->pluck('order_id')->filter()->unique())
+            ->whereIn('created_by', $reviewCollection->pluck('user_id')->filter()->unique())
+            ->whereNotNull('reply')
+            ->get(['order_id', 'product_id', 'created_by', 'reply', 'replied_at'])
+            ->keyBy(fn (SalesReview $review) => implode(':', [
+                (int) $review->order_id,
+                (int) $review->product_id,
+                (int) $review->created_by,
+            ]));
+
+        $reviewCollection->transform(function (EcommerceProductReview $review) use ($replyMap) {
             $name = trim(($review->user?->fname ?? '') . ' ' . ($review->user?->lname ?? ''));
+            $reply = $replyMap->get(implode(':', [
+                (int) $review->order_id,
+                (int) $review->product_id,
+                (int) $review->user_id,
+            ]));
+
             return [
                 'id' => $review->id,
                 'rating' => (int) $review->rating,
                 'review_text' => $review->review_text,
+                'attachment_url' => $review->attachment_path
+                    ? "/api/ecommerce/reviews/{$review->id}/attachment"
+                    : null,
+                'store_reply' => $reply?->reply,
+                'replied_at' => $reply?->replied_at,
                 'customer_name' => $name !== '' ? $name : 'Customer',
                 'created_at' => $review->created_at,
             ];
@@ -1706,6 +1734,30 @@ class EcommerceController extends Controller
         });
 
         try {
+            $customerItems = $order->relationLoaded('items') ? $order->items : collect();
+            $this->notify((int) $user->id, [
+                'store_id' => (int) $order->store_id,
+                'branch_id' => (int) ($order->assigned_branch_id ?? 0) ?: null,
+                'module' => 'ecommerce',
+                'entity_type' => 'ecommerce_order',
+                'entity_id' => (int) $order->id,
+                'action' => 'created',
+                'title' => 'Order placed successfully',
+                'message' => "Your order {$order->order_number} has been placed and is awaiting confirmation.",
+                'severity' => 'success',
+                'link' => "/orders/{$order->id}",
+                'data' => [
+                    'order_id' => (int) $order->id,
+                    'order_number' => (string) $order->order_number,
+                    'items' => $customerItems->map(fn ($item) => [
+                        'id' => (int) $item->id,
+                        'product_id' => (int) $item->product_id,
+                        'product_name' => (string) $item->product_name,
+                        'quantity' => (int) $item->quantity,
+                    ])->values()->all(),
+                ],
+            ]);
+
             $this->notifyUsersByPermissions(
                 (int) $order->store_id,
                 ['sales.ecommerce-orders.view', 'sales.ecommerce-orders.manage', 'sales.orders.view'],
@@ -1780,7 +1832,15 @@ class EcommerceController extends Controller
     {
         $user = Auth::user();
         $ordersQuery = EcommerceOrder::query()
-            ->with(['store:id,name', 'assignedBranch:id,name,branch_code,city,province,latitude,longitude', 'delivery', 'items.product.assets', 'items.product.category'])
+            ->with([
+                'store:id,name',
+                'assignedBranch:id,name,branch_code,city,province,latitude,longitude',
+                'delivery',
+                'cancellationRequests',
+                'items.product.assets',
+                'items.product.category',
+                'items.returnRequests.financeRefund',
+            ])
             ->withCount('items')
             ->where('user_id', $user->id);
 
@@ -1811,6 +1871,7 @@ class EcommerceController extends Controller
                 'items.product.assets',
                 'items.product.category',
                 'items.returnRequests',
+                'items.returnRequests.financeRefund',
                 'items.returnRequests.investigationTicket.assignees.user:id,fname,lname',
                 'items.review',
                 'delivery.logs:id,delivery_id,order_id,event_type,status_from,status_to,message,meta,created_by,created_at',
@@ -1880,9 +1941,9 @@ class EcommerceController extends Controller
         $validated = $request->validate([
             'reason' => ['required', 'string', 'max:1000'],
             'details' => ['nullable', 'string', 'max:2000'],
-            'requested_quantity' => ['nullable', 'integer', 'min:1'],
-            'evidence_images' => ['nullable', 'array', 'max:5'],
-            'evidence_images.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
+            'requested_quantity' => ['required', 'integer', 'min:1'],
+            'evidence_images' => ['required', 'array', 'min:1', 'max:5'],
+            'evidence_images.*' => ['required', 'file', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ]);
 
         $user = Auth::user();
@@ -1965,6 +2026,7 @@ class EcommerceController extends Controller
             'evidence_urls' => $evidenceUrls,
             'status' => 'pending_verification',
         ]);
+        $orderItem->order->update(['status' => 'return_pending']);
 
         try {
             $this->notifyUsersByPermissions(
@@ -1994,11 +2056,73 @@ class EcommerceController extends Controller
         ], 201);
     }
 
+    public function updateRefundPaymentMethod(Request $request, EcommerceOrderReturn $return): JsonResponse
+    {
+        abort_unless((int) $return->user_id === (int) $request->user()->id, 403, 'Unauthorized access to return request.');
+
+        $validated = $request->validate([
+            'refund_method' => ['required', Rule::in(['gcash', 'card'])],
+            'refund_account_name' => ['required', 'string', 'max:255'],
+            'refund_account_number' => ['required', 'string', 'max:100'],
+        ]);
+
+        if ((string) $return->return_type !== 'refund' || !in_array((string) $return->status, ['approved', 'received', 'refund_pending'], true)) {
+            return response()->json(['message' => 'Refund payment details are not available for this return.'], 422);
+        }
+
+        $return->loadMissing(['order', 'orderItem']);
+        $refund = FinanceRefund::query()->firstOrCreate(
+            [
+                'store_id' => (int) $return->store_id,
+                'order_type' => 'ecommerce_return',
+                'order_id' => (int) $return->id,
+            ],
+            [
+                'branch_id' => $return->order?->assigned_branch_id,
+                'order_number' => $return->order?->order_number,
+                'customer_name' => $return->order?->shipping_name,
+                'reason' => 'Approved customer return ' . ($return->return_number ?: ('#' . $return->id)),
+                'amount' => round((float) ($return->orderItem?->unit_price ?? 0) * (int) ($return->requested_quantity ?: 1), 2),
+                'status' => in_array((string) $return->status, ['received', 'refund_pending'], true)
+                    ? 'pending'
+                    : 'pending_inspection',
+                'requested_by' => $request->user()->id,
+                'notes' => 'Customer provided the refund destination from Ecommerce Order Details.',
+            ]
+        );
+
+        if (!in_array((string) $refund->status, ['pending_inspection', 'pending'], true)) {
+            return response()->json(['message' => 'This refund can no longer accept payment detail changes.'], 422);
+        }
+
+        $refund->update([
+            'refund_method' => $validated['refund_method'],
+            'refund_account_name' => trim($validated['refund_account_name']),
+            'refund_account_number' => trim($validated['refund_account_number']),
+        ]);
+
+        return response()->json(['message' => 'Refund payment method saved.', 'data' => $refund->fresh()]);
+    }
+
+    public function reviewAttachment(EcommerceProductReview $review)
+    {
+        abort_unless($review->status === 'published' && $review->attachment_path, 404);
+        abort_unless(Storage::disk('public')->exists($review->attachment_path), 404);
+
+        return Storage::disk('public')->response(
+            $review->attachment_path,
+            null,
+            ['Cache-Control' => 'public, max-age=86400'],
+            'inline'
+        );
+    }
+
     public function submitItemReview(Request $request, int $itemId)
     {
         $validated = $request->validate([
             'rating' => ['required', 'integer', 'min:1', 'max:5'],
             'review_text' => ['nullable', 'string', 'max:2000'],
+            'attachment' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
 
         $user = Auth::user();
@@ -2026,20 +2150,38 @@ class EcommerceController extends Controller
             ], 422);
         }
 
+        $existingReview = EcommerceProductReview::query()
+            ->where('order_item_id', $orderItem->id)
+            ->where('user_id', $user->id)
+            ->first();
+        $previousAttachmentPath = $existingReview?->attachment_path;
+        $reviewValues = [
+            'order_id' => $orderItem->order_id,
+            'product_id' => $orderItem->product_id,
+            'store_id' => $orderItem->order->store_id,
+            'rating' => (int) $validated['rating'],
+            'review_text' => $validated['review_text'] ?? null,
+            'status' => 'published',
+        ];
+
+        if ($request->hasFile('attachment')) {
+            $reviewValues['attachment_path'] = $request->file('attachment')->store(
+                "ecommerce/reviews/{$orderItem->order->store_id}/{$orderItem->product_id}",
+                'public'
+            );
+        }
+
         $review = EcommerceProductReview::query()->updateOrCreate(
             [
                 'order_item_id' => $orderItem->id,
                 'user_id' => $user->id,
             ],
-            [
-                'order_id' => $orderItem->order_id,
-                'product_id' => $orderItem->product_id,
-                'store_id' => $orderItem->order->store_id,
-                'rating' => (int) $validated['rating'],
-                'review_text' => $validated['review_text'] ?? null,
-                'status' => 'published',
-            ]
+            $reviewValues
         );
+
+        if ($request->hasFile('attachment') && $previousAttachmentPath && $previousAttachmentPath !== $review->attachment_path) {
+            Storage::disk('public')->delete($previousAttachmentPath);
+        }
 
         // Keep Sales > Reviews in sync with ecommerce customer reviews.
         $existingSalesReview = SalesReview::query()
@@ -2976,8 +3118,6 @@ class EcommerceController extends Controller
                 $eligibleAfterDelivery = in_array($orderStatus, ['delivered', 'completed'], true);
                 $deliveredAt = $order->delivery?->delivered_at ?? $order->updated_at;
                 $withinReturnWindow = $deliveredAt && !$deliveredAt->lt(now()->subDays(7));
-                $returnPending = $primaryStatus === 'return_pending';
-
                 return [
                     'id' => $item->id,
                     'product_id' => $item->product_id,
@@ -3000,7 +3140,8 @@ class EcommerceController extends Controller
                     'line_total' => (float) $item->line_total,
                     'image' => $item->product ? $this->selectBestProductImage($item->product)?->url : null,
                     'can_return' => $eligibleAfterDelivery && $withinReturnWindow && (!$latestReturn || $latestReturn->status === 'rejected'),
-                    'can_review' => $eligibleAfterDelivery && !$returnPending && !$review,
+                    'can_review' => $eligibleAfterDelivery && !$review
+                        && (!$latestReturn || $latestReturn->status === 'rejected'),
                     'return_request' => $latestReturn ? [
                         'id' => $latestReturn->id,
                         'status' => $latestReturn->status,
@@ -3008,9 +3149,24 @@ class EcommerceController extends Controller
                         'details' => $latestReturn->details,
                         'review_notes' => $latestReturn->review_notes,
                         'requested_quantity' => (int) $latestReturn->requested_quantity,
+                        'return_type' => $latestReturn->return_type,
+                        'refund_eta' => $latestReturn->return_type === 'refund' ? 'less than 30 days after Finance sends the refund' : null,
+                        'refund_method_required' => $latestReturn->return_type === 'refund'
+                            && !$latestReturn->financeRefund?->refund_method,
                         'created_at' => $latestReturn->created_at,
+                        'refund' => $latestReturn->financeRefund ? [
+                            'id' => (int) $latestReturn->financeRefund->id,
+                            'status' => $latestReturn->financeRefund->status,
+                            'refund_method' => $latestReturn->financeRefund->refund_method,
+                            'refund_account_name' => $latestReturn->financeRefund->refund_account_name,
+                            'refund_account_number' => $latestReturn->financeRefund->refund_account_number,
+                            'payout_provider' => $latestReturn->financeRefund->payout_provider,
+                            'payout_reference' => $latestReturn->financeRefund->payout_reference,
+                            'sent_at' => $latestReturn->financeRefund->sent_at,
+                        ] : null,
                         'investigation_ticket' => $latestReturn->investigationTicket ? [
                             'id' => (int) $latestReturn->investigationTicket->id,
+                            'reference_number' => $latestReturn->investigationTicket->reference_number,
                             'status' => $latestReturn->investigationTicket->status,
                             'expected_investigation_date' => $latestReturn->investigationTicket->expected_investigation_date,
                             'notes' => $latestReturn->investigationTicket->notes,
@@ -3040,6 +3196,7 @@ class EcommerceController extends Controller
         // Normalize the customer-facing order status to a small set of timeline states.
         $baseStatus = match (true) {
             in_array($orderStatus, ['cancelled', 'canceled'], true) => 'cancelled',
+            in_array($orderStatus, ['return_pending', 'return_approved', 'return_received', 'refund_pending', 'refunded', 'replaced'], true) => $orderStatus,
             in_array($orderStatus, ['delivered', 'completed'], true) => 'delivered',
             in_array($orderStatus, ['packed', 'shipped', 'in_transit', 'out_for_delivery', 'on_delivery'], true) => 'in_transit',
             in_array($orderStatus, ['processing', 'confirmed', 'ready_for_dispatch'], true) => 'packing',
@@ -3689,3 +3846,5 @@ class EcommerceController extends Controller
         return preg_match($pattern, $message) === 1;
     }
 }
+
+

@@ -67,6 +67,7 @@ Route::prefix('ecommerce')->group(function () {
     Route::get('/products/active-stock', [EcommerceActiveStockProductsController::class, 'index']);
     Route::get('/categories/active-stock', [EcommerceActiveStockProductsController::class, 'categories']);
     Route::get('/categories/{categoryId}/top-stores', [EcommerceActiveStockProductsController::class, 'topStores']);
+    Route::get('/reviews/{review}/attachment', [EcommerceController::class, 'reviewAttachment']);
     Route::get('/products/{id}', [EcommerceController::class, 'productShow']);
     Route::get('/stores', [EcommerceController::class, 'storeDirectory']);
     Route::get('/stores/{storeId}', [EcommerceController::class, 'storeProfile']);

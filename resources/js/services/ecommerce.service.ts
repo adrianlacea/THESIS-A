@@ -235,35 +235,41 @@ const ecommerceService = {
   requestOrderReturn(itemId: number | string, payload: {
     reason: string
     details?: string
-    requested_quantity?: number
-    evidence_images?: File[]
+    requested_quantity: number
+    evidence_images: File[]
   }) {
-    if (Array.isArray(payload.evidence_images) && payload.evidence_images.length) {
-      const formData = new FormData()
-      formData.append('reason', payload.reason)
-      if (payload.details) formData.append('details', payload.details)
-      if (payload.requested_quantity) formData.append('requested_quantity', String(payload.requested_quantity))
-      payload.evidence_images.forEach((file) => formData.append('evidence_images[]', file))
+    const formData = new FormData()
+    formData.append('reason', payload.reason)
+    if (payload.details) formData.append('details', payload.details)
+    formData.append('requested_quantity', String(payload.requested_quantity))
+    payload.evidence_images.forEach((file) => formData.append('evidence_images[]', file))
 
-      return ecommerceClient.post(`/api/ecommerce/order-items/${itemId}/return-requests`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-    }
+    return ecommerceClient.post(`/api/ecommerce/order-items/${itemId}/return-requests`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 
-    const body = {
-      reason: payload.reason,
-      details: payload.details,
-      requested_quantity: payload.requested_quantity,
-    }
-
-    return ecommerceClient.post(`/api/ecommerce/order-items/${itemId}/return-requests`, body)
+  updateRefundPaymentMethod(returnId: number | string, payload: {
+    refund_method: 'gcash' | 'card'
+    refund_account_name: string
+    refund_account_number: string
+  }) {
+    return ecommerceClient.put(`/api/ecommerce/returns/${returnId}/refund-payment-method`, payload)
   },
 
   submitItemReview(itemId: number | string, payload: {
     rating: number
     review_text?: string
+    attachment?: File | null
   }) {
-    return ecommerceClient.post(`/api/ecommerce/order-items/${itemId}/reviews`, payload)
+    const formData = new FormData()
+    formData.append('rating', String(payload.rating))
+    if (payload.review_text) formData.append('review_text', payload.review_text)
+    if (payload.attachment) formData.append('attachment', payload.attachment)
+
+    return ecommerceClient.post(`/api/ecommerce/order-items/${itemId}/reviews`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
   },
 
   reportViolation(payload: {

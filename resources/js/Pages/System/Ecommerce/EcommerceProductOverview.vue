@@ -269,6 +269,20 @@
               <div class="text-sm text-amber-500">{{ '★'.repeat(review.rating) }}</div>
             </div>
             <p class="mt-3 text-sm text-slate-600">{{ review.review_text || 'No review text provided.' }}</p>
+            <a v-if="review.attachment_url && !brokenReviewAttachments.includes(Number(review.id))"
+              :href="review.attachment_url" target="_blank" rel="noopener"
+              class="mt-3 inline-block overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              <img :src="review.attachment_url" alt="Customer review attachment"
+                class="block h-24 w-24 object-cover transition hover:scale-105"
+                @error="hideBrokenReviewAttachment(review.id)" />
+            </a>
+            <div v-if="review.store_reply" class="mt-4 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-orange-700">Store Reply</p>
+                <p v-if="review.replied_at" class="text-xs text-slate-500">{{ formatDate(review.replied_at) }}</p>
+              </div>
+              <p class="mt-1 text-sm text-slate-700">{{ review.store_reply }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -361,6 +375,7 @@ const storeInfo = ref<{ id: number; name: string; logo: string | null; rating_av
 const show3DViewer = ref(false)
 const selectedImage = ref<string | null>(null)
 const brokenImages = ref<string[]>([])
+const brokenReviewAttachments = ref<number[]>([])
 const hoverZoomVisible = ref(false)
 const hoverX = ref(50)
 const hoverY = ref(50)
@@ -564,6 +579,13 @@ function handleImageError(event: Event) {
 function onImageError(event: Event) {
   const target = event.target as HTMLImageElement | null
   if (target) target.src = '/F.svg'
+}
+
+function hideBrokenReviewAttachment(reviewId: number | string) {
+  const id = Number(reviewId)
+  if (!brokenReviewAttachments.value.includes(id)) {
+    brokenReviewAttachments.value = [...brokenReviewAttachments.value, id]
+  }
 }
 
 function variationLabel(variation: any) {

@@ -98,7 +98,7 @@ const isLoggedIn = computed(() => authStore.isAuthenticated)
 const cartCount = ref(0)
 const unreadNotificationCount = ref(0)
 let notificationPoll: ReturnType<typeof setInterval> | null = null
-const isNotificationsActive = computed(() => String(route.name || '') === 'ecommerce.profile' && String(route.query?.section || '') === 'notifications')
+const isNotificationsActive = computed(() => String(route.name || '') === 'ecommerce.notifications')
 
 function isActive(names: string[]) {
   return names.includes(String(route.name || ''))
@@ -117,12 +117,7 @@ function goAuth(name: string) {
 }
 
 function goNotifications() {
-  try {
-    localStorage.setItem('ecommerce_profile_section', 'notifications')
-  } catch {
-    // no-op
-  }
-  router.push({ name: 'ecommerce.profile', query: { section: 'notifications' } })
+  goAuth('ecommerce.notifications')
 }
 
 async function loadCartCount() {
@@ -147,6 +142,7 @@ async function loadUnreadNotificationCount() {
 
   try {
     const response = await axiosClient.get('/api/notifications/unread', {
+      params: { module: 'ecommerce' },
       headers: { 'X-Suppress-Dialog': '1' },
     })
     unreadNotificationCount.value = Number(response.data?.data?.unread_count || 0)
@@ -157,6 +153,10 @@ async function loadUnreadNotificationCount() {
 
 function handleCartUpdated() {
   loadCartCount()
+}
+
+function handleNotificationsUpdated() {
+  loadUnreadNotificationCount()
 }
 
 watch(() => route.fullPath, () => {
@@ -173,10 +173,12 @@ onMounted(() => {
   loadUnreadNotificationCount()
   notificationPoll = setInterval(loadUnreadNotificationCount, 30000)
   window.addEventListener('ecommerce-cart-updated', handleCartUpdated)
+  window.addEventListener('ecommerce-notifications-updated', handleNotificationsUpdated)
 })
 
 onUnmounted(() => {
   window.removeEventListener('ecommerce-cart-updated', handleCartUpdated)
+  window.removeEventListener('ecommerce-notifications-updated', handleNotificationsUpdated)
   if (notificationPoll) clearInterval(notificationPoll)
 })
 </script>

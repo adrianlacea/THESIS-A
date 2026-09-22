@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Core\ActivityLog;
+use App\Models\Core\SystemNotification;
 use App\Models\Customer\Customer;
 use App\Models\Hr\Employee;
 use App\Mail\OtpVerificationMail;
@@ -24,12 +25,14 @@ class ProfileController extends Controller
             ->where('user_id', $user->id)
             ->latest('id')
             ->first();
+        $customerProfile = $this->customerProfileData($customer, (int) $user->id);
         return response()->json([
             'success' => true,
             'data' => [
                 'user' => $user,
                 'employee' => $employee,
-                'customer' => $customer,
+                'customer' => $customerProfile,
+                'verification_documents' => [],
             ]
         ]);
     }
@@ -138,12 +141,43 @@ class ProfileController extends Controller
             'data' => [
                 'user' => $user->fresh(),
                 'employee' => $employee?->fresh(),
-                'customer' => Customer::query()
-                    ->where('user_id', $user->id)
-                    ->latest('id')
-                    ->first(),
+                'customer' => $this->customerProfileData(
+                    Customer::query()->where('user_id', $user->id)->latest('id')->first(),
+                    (int) $user->id
+                ),
+                'verification_documents' => [],
             ]
         ]);
+    }
+
+    private function customerProfileData(?Customer $customer, int $userId): array
+    {
+        $profile = $customer?->toArray() ?? [
+            'user_id' => $userId,
+            'contact_number' => null,
+        ];
+
+        $decision = SystemNotification::query()
+            ->where('user_id', $userId)
+            ->where('module', 'ecommerce')
+            ->where('entity_type', 'customer_verification')
+            ->latest('created_at')
+            ->first(['action', 'title', 'message', 'created_at']);
+
+        $action = strtolower((string) ($decision?->action ?? ''));
+        $title = strtolower((string) ($decision?->title ?? ''));
+        $status = match (true) {
+            $action === 'approved' || str_contains($title, 'approved') => 'approved',
+            $action === 'rejected' || str_contains($title, 'rejected') => 'rejected',
+            $action === 'pending' || str_contains($title, 'pending') => 'pending',
+            default => 'unverified',
+        };
+
+        $profile['verification_status'] = $status;
+        $profile['verification_reviewed_at'] = $status === 'approved' ? $decision?->created_at : null;
+        $profile['verification_message'] = $decision?->message;
+
+        return $profile;
     }
 
     public function updateAvatar(Request $request)

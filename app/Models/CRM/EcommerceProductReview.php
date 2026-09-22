@@ -10,6 +10,7 @@ use App\Models\ProductCatalog\Product;
 use App\Models\Store\Store;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 class EcommerceProductReview extends Model
 {
@@ -23,12 +24,22 @@ class EcommerceProductReview extends Model
         'user_id',
         'rating',
         'review_text',
+        'attachment_path',
         'status',
     ];
+
+    protected $appends = ['attachment_url'];
 
     protected $casts = [
         'rating' => 'integer',
     ];
+
+    public function getAttachmentUrlAttribute(): ?string
+    {
+        return $this->attachment_path
+            ? Storage::disk('public')->url($this->attachment_path)
+            : null;
+    }
 
     public function order(): BelongsTo
     {

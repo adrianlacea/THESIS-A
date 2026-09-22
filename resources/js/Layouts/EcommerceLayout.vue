@@ -25,14 +25,54 @@
           </IconField>
         </form>
   
-        <div class="hidden md:flex items-center gap-1">
-          <!-- <Button label="Stores" text rounded class="compact-button !text-xs !px-2 !py-1.5" @click="router.push({ name: 'ecommerce.stores' })" /> -->
-          <Button icon="pi pi-shopping-cart" text :badge="cartCount.toString()" badgeSeverity="secondary"
-            class="compact-button !text-xs !px-2 !py-1.5" rounded @click="goCart" fluid />
+        <div class="hidden items-center gap-2 md:flex">
+          <div class="relative flex h-10 w-10 items-center justify-center">
+            <Button
+              icon="pi pi-shopping-cart"
+              text
+              rounded
+              class="header-action-button"
+              aria-label="Cart"
+              v-tooltip.bottom="'Cart'"
+              @click="goCart"
+            />
+            <Badge
+              v-if="cartCount > 0"
+              :value="cartCount > 99 ? '99+' : String(cartCount)"
+              severity="secondary"
+              class="header-action-badge"
+            />
+          </div>
+          <div v-if="isLoggedIn" class="relative flex h-10 w-10 items-center justify-center">
+            <Button
+              icon="pi pi-bell"
+              text
+              rounded
+              class="header-action-button"
+              aria-label="Notifications"
+              v-tooltip.bottom="'Notifications'"
+              @click="goNotifications"
+            />
+            <Badge
+              v-if="unreadNotificationCount > 0"
+              :value="unreadNotificationCount > 99 ? '99+' : String(unreadNotificationCount)"
+              severity="danger"
+              class="header-action-badge"
+            />
+          </div>
           <Button v-if="!isLoggedIn" label="Login" rounded class="compact-button !text-sm" size="small" fluid
             @click="goLogin" />
-          <Button v-else icon="pi pi-user" rounded text fluid v-tooltip.bottom="'Profile'"
-            @click="toggleProfilePopover" />
+          <div v-else class="flex h-10 w-10 items-center justify-center">
+            <Button
+              icon="pi pi-user"
+              rounded
+              text
+              class="header-action-button"
+              aria-label="Account"
+              v-tooltip.bottom="'Account'"
+              @click="toggleProfilePopover"
+            />
+          </div>
         </div>
       </div>
     </header>
@@ -77,9 +117,6 @@
           <Button label="Profile" icon="pi pi-user" text severity="secondary"
             class="w-full !justify-start !px-2 !py-2 text-left"
             :pt="{ root: { class: '!justify-start' }, label: { class: '!text-left' } }" @click="goProfile" />
-          <Button label="Notifications" icon="pi pi-bell" text severity="secondary"
-            class="w-full !justify-start !px-2 !py-2 text-left"
-            :pt="{ root: { class: '!justify-start' }, label: { class: '!text-left' } }" @click="goNotifications" />
           <Button label="Orders" icon="pi pi-shopping-bag" text severity="secondary"
             class="w-full !justify-start !px-2 !py-2 text-left"
             :pt="{ root: { class: '!justify-start' }, label: { class: '!text-left' } }" @click="goOrders" />
@@ -109,6 +146,7 @@ import IconField from 'primevue/iconfield'
 import InputIcon from 'primevue/inputicon'
 import InputText from 'primevue/inputtext'
 import { useConfirm } from 'primevue/useconfirm'
+import axiosClient from '@/axios'
 
 const route = useRoute()
 const router = useRouter()
@@ -120,6 +158,7 @@ const pageTitle = computed(() => String(page.props?.title || ''))
 const productSearch = ref('')
 
 const cartCount = ref(0)
+const unreadNotificationCount = ref(0)
 const isLoggedIn = computed(() => authStore.isAuthenticated)
 const profilePopoverRef = ref()
 const chatThreads = ref<any[]>([])
@@ -172,13 +211,23 @@ function goProfile() {
 }
 
 function goNotifications() {
-  profilePopoverRef.value?.hide()
-  try {
-    localStorage.setItem('ecommerce_profile_section', 'notifications')
-  } catch {
-    // no-op
+  router.push({ name: 'ecommerce.notifications' })
+}
+
+async function loadUnreadNotificationCount() {
+  if (!isLoggedIn.value) {
+    unreadNotificationCount.value = 0
+    return
   }
-  router.push({ name: 'ecommerce.profile', query: { section: 'notifications' } })
+  try {
+    const response = await axiosClient.get('/api/notifications/unread', {
+      params: { module: 'ecommerce' },
+      headers: { 'X-Suppress-Dialog': '1' },
+    })
+    unreadNotificationCount.value = Number(response.data?.data?.unread_count || 0)
+  } catch {
+    unreadNotificationCount.value = 0
+  }
 }
 
 function toggleProfilePopover(event: Event) {
@@ -227,6 +276,10 @@ function handleCartUpdated() {
   loadCartCount()
 }
 
+function handleNotificationsUpdated() {
+  loadUnreadNotificationCount()
+}
+
 async function loadChatThreads() {
   if (!isLoggedIn.value) {
     chatThreads.value = []
@@ -241,23 +294,30 @@ async function loadChatThreads() {
   }
 }
 
-watch(() => route.fullPath, loadCartCount)
+watch(() => route.fullPath, () => {
+  loadCartCount()
+  loadUnreadNotificationCount()
+})
 watch(() => page.url, () => {
   productSearch.value = searchFromUrl()
 }, { immediate: true })
 watch(isLoggedIn, () => {
   loadCartCount()
   loadChatThreads()
+  loadUnreadNotificationCount()
 })
 
 onMounted(() => {
   loadCartCount()
   loadChatThreads()
+  loadUnreadNotificationCount()
   window.addEventListener('ecommerce-cart-updated', handleCartUpdated)
+  window.addEventListener('ecommerce-notifications-updated', handleNotificationsUpdated)
 })
 
 onUnmounted(() => {
   window.removeEventListener('ecommerce-cart-updated', handleCartUpdated)
+  window.removeEventListener('ecommerce-notifications-updated', handleNotificationsUpdated)
 })
 </script>
 
@@ -272,6 +332,24 @@ onUnmounted(() => {
 
 .portal-brand {
   font-family: 'Barabara', sans-serif;
+}
+
+.header-action-button {
+  width: 2.5rem !important;
+  height: 2.5rem !important;
+  min-width: 2.5rem !important;
+  padding: 0 !important;
+}
+
+.header-action-badge {
+  position: absolute !important;
+  right: -0.2rem !important;
+  top: -0.2rem !important;
+  min-width: 1.15rem !important;
+  height: 1.15rem !important;
+  padding: 0 0.25rem !important;
+  font-size: 0.65rem !important;
+  line-height: 1.15rem !important;
 }
 
 @media (max-width: 640px) {

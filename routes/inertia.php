@@ -425,4 +425,5 @@ $inertia('/orders/{id}/cancel', 'System/Ecommerce/EcommerceOrderCancel', 'ecomme
 $inertia('/orders/{id}/items/{itemId}/return', 'System/Ecommerce/EcommerceOrderReturn', 'ecommerce.order-return', 'Return Item');
 $inertia('/orders/{id}/items/{itemId}/review', 'System/Ecommerce/EcommerceOrderReview', 'ecommerce.order-review', 'Review Item');
 $inertia('/chats', 'System/Ecommerce/EcommerceChats', 'ecommerce.chats', 'Chats');
+$inertia('/notifications', 'System/Ecommerce/EcommerceNotifications', 'ecommerce.notifications', 'Notifications');
 $inertia('/profile', 'System/Ecommerce/EcommerceProfile', 'ecommerce.profile', 'My Profile');

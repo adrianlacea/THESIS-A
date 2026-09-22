@@ -177,7 +177,7 @@ class ReviewController extends Controller
                 'title' => 'Store replied to your review',
                 'message' => "The store replied to your review for {$productName}: \"" . (string) $review->reply . '"',
                 'severity' => 'info',
-                'link' => '/shop/products/' . (int) $review->product_id . '?tab=reviews',
+                'link' => '/products/' . (int) $review->product_id . '?tab=reviews',
                 'data' => [
                     'product_id' => (int) $review->product_id,
                     'reply' => (string) $review->reply,

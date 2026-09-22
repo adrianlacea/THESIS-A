@@ -28,6 +28,12 @@ class SalesOrderDeliveryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        // A few older orders can already be marked Ready for Dispatch without
+        // having an order_deliveries row (for example, after a status update
+        // made before the delivery queue was introduced). Reconcile those
+        // orders before reading the queue so Sales and Logistics stay in sync.
+        $this->ensureReadyOrdersAreQueued($request);
+
         $status = $request->filled('status') ? (string) $request->input('status') : null;
         $search = trim((string) $request->input('search', ''));
 
@@ -119,6 +125,48 @@ class SalesOrderDeliveryController extends Controller
             ->values();
 
         return response()->json(['success' => true, 'data' => $deliveries]);
+    }
+
+    private function ensureReadyOrdersAreQueued(Request $request): void
+    {
+        $query = SalesOrder::query()
+            ->where('status', 'ready_for_dispatch')
+            ->where('delivery_required', true)
+            ->whereDoesntHave('delivery');
+
+        $this->applyTenantScope($request, $query);
+        $orders = $query->get();
+        if ($orders->isEmpty()) {
+            return;
+        }
+
+        DB::transaction(function () use ($orders, $request): void {
+            foreach ($orders as $order) {
+                $delivery = SalesOrderDelivery::query()->firstOrCreate(
+                    ['sales_order_id' => $order->id],
+                    [
+                        'store_id' => $order->store_id,
+                        'branch_id' => $order->branch_id,
+                        'status' => 'ready_for_dispatch',
+                        'notes' => 'Order is ready for logistics assignment.',
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                    ]
+                );
+
+                if ($delivery->wasRecentlyCreated) {
+                    SalesOrderDeliveryLog::query()->create([
+                        'delivery_id' => $delivery->id,
+                        'sales_order_id' => $order->id,
+                        'store_id' => $order->store_id,
+                        'event_type' => 'created',
+                        'status_to' => 'ready_for_dispatch',
+                        'message' => 'Ready for Dispatch order queued for logistics assignment.',
+                        'created_by' => $request->user()->id,
+                    ]);
+                }
+            }
+        });
     }
 
     public function show(Request $request, int $id): JsonResponse

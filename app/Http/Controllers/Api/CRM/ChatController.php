@@ -135,7 +135,7 @@ class ChatController extends Controller
             'title' => 'New message from store',
             'message' => $preview,
             'severity' => 'info',
-            'link' => '/shop/chats?store_id=' . (int) $thread->store_id,
+            'link' => '/chats?store_id=' . (int) $thread->store_id,
         ]);
 
         return response()->json([

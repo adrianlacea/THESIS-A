@@ -94,6 +94,27 @@ class PaymongoService
         }
     }
 
+    public function createRefund(string $paymentId, int $amount, string $reason = 'requested_by_customer'): array
+    {
+        try {
+            $response = $this->client->post('/refunds', [
+                'json' => ['data' => ['attributes' => [
+                    'amount' => $amount,
+                    'currency' => 'PHP',
+                    'payment_id' => $paymentId,
+                    'reason' => $reason,
+                ]]],
+            ]);
+            $status = (int) $response->getStatusCode();
+            $decoded = json_decode($response->getBody()->getContents(), true) ?: [];
+            $decoded['_http_status'] = $status;
+            return $decoded;
+        } catch (\Throwable $e) {
+            Log::error('PaymongoService: createRefund exception', ['payment_id' => $paymentId, 'error' => $e->getMessage()]);
+            return ['errors' => [['detail' => 'Unable to connect to PayMongo for the refund.']], '_http_status' => 500];
+        }
+    }
+
     public function createPaymentMethod(array $payload): array
     {
         try {

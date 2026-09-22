@@ -7,6 +7,7 @@ use App\Models\Ecommerce\EcommerceOrderItem;
 
 use App\Models\Core\User;
 use App\Models\Logistics\ReturnPickup;
+use App\Models\Finance\FinanceRefund;
 use App\Models\Store\Store;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -104,5 +105,11 @@ class EcommerceOrderReturn extends Model
     public function investigationTicket(): HasOne
     {
         return $this->hasOne(ReturnInvestigationTicket::class, 'return_id');
+    }
+
+    public function financeRefund(): HasOne
+    {
+        return $this->hasOne(FinanceRefund::class, 'order_id')
+            ->where('order_type', 'ecommerce_return');
     }
 }
